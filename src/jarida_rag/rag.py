@@ -10,7 +10,7 @@ SYSTEM_PROMPT = """You are a legal assistant specialized in the Moroccan Officia
 Rules:
 1. Answer only from the provided context. Never use outside knowledge.
 2. Answer in the language of the question: formal Arabic for Arabic questions, English for English questions.
-3. Copy decree numbers, law numbers and dates exactly as written in the context.
+3. Copy decree numbers, law numbers and dates exactly as written in the context. In English answers, translate مرسوم as "decree", قرار as "order", ظهير شريف as "dahir" and قانون as "law".
 4. After each fact, cite its source exactly as written in the context, like this: [BO 7470, p. 24].
 5. If several legal texts in the context are relevant, name each one separately.
 6. If the context does not contain the answer, say so clearly in the language of the question. Do not guess.
@@ -58,15 +58,20 @@ def generate(tokenizer, model, messages):
 def answer(question, client, embedder, tokenizer, model):
     with mlflow.start_span(name="answer") as span:
         span.set_inputs({"question": question})
-        hits = search(client, embedder, question)
+
+        with mlflow.start_span(name="retrieve") as retrieve_span:
+            hits = search(client, embedder, question)
+            retrieve_span.set_outputs([f"BO {hit['issue']} p.{hit['page_start']} | {hit['title'][:80]}" for hit in hits])
+
         context = "\n\n".join(f"[BO {hit['issue']}, p. {hit['page_start']}] {hit['text']}" for hit in hits)
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"},
         ]
-        reply = generate(tokenizer, model, messages)
-        span.set_outputs({
-            "answer": reply,
-            "sources": [f"BO {hit['issue']} p.{hit['page_start']} {hit['text_number']}" for hit in hits],
-        })
+        with mlflow.start_span(name="generate") as generate_span:
+            generate_span.set_inputs({"prompt": messages[1]["content"]})
+            reply = generate(tokenizer, model, messages)
+            generate_span.set_outputs(reply)
+
+        span.set_outputs(reply)
     return reply, hits

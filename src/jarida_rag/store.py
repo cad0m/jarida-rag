@@ -43,5 +43,14 @@ def build_index(client, embedder):
 
 def search(client, embedder, question, limit=config.TOP_K):
     vector = embed(embedder, [question])[0]
-    hits = client.query_points(config.COLLECTION, query=vector.tolist(), limit=limit).points
-    return [hit.payload for hit in hits]
+    hits = client.query_points(config.COLLECTION, query=vector.tolist(), limit=limit * 4).points
+
+    # keep a few chunks per legal text, so one long decree can't fill the whole context
+    results = []
+    per_text = {}
+    for hit in hits:
+        key = (hit.payload["doc_id"], hit.payload["title"])
+        per_text[key] = per_text.get(key, 0) + 1
+        if per_text[key] <= config.MAX_CHUNKS_PER_TEXT:
+            results.append(hit.payload)
+    return results[:limit]

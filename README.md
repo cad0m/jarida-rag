@@ -21,8 +21,9 @@ Settings (models, chunk size, top-k, GPUs) are plain variables in `src/jarida_ra
 
 - PDFs are not in git. Put them in `data/` locally, or attach them as a Kaggle dataset.
 - `data/manifest.csv`: one row per PDF (`filename, issue, date, lang`).
-- `data/questions.csv`: evaluation questions with the decree number that answers them. Leave `text_number` empty
-  for questions the gazette can't answer.
+- `data/questions.csv`: evaluation questions. `expected` is the decree number that answers it, or a phrase from the
+  title for studies and notices. Leave it empty for questions the gazette can't answer.
+- Experiments and traces are logged to MLflow on DagsHub (local `work/mlflow.db` when no `MLFLOW_TRACKING_URI` is set).
 
 ## Run on Kaggle (GPU T4 x2)
 

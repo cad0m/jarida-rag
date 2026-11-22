@@ -8,6 +8,8 @@ from . import config
 
 ARABIC_LETTERS = "ء-ي"
 ARABIC_LETTER = re.compile(f"[{ARABIC_LETTERS}]")
+# decorative stretching ("قــرار"), it breaks title matching
+TATWEEL = "ـ"
 # pdfium splits the "ال" ligature: "المالية" comes out as "املالية"
 BROKEN_AL = re.compile(rf"(?<![{ARABIC_LETTERS}])([وبف]?)ا([{ARABIC_LETTERS}])ل")
 DOT_LEADER = re.compile(r"[.…](?:\s?[.…]){2,}")
@@ -29,6 +31,7 @@ def file_hash(path):
 
 
 def clean_text(text):
+    text = text.replace("\r\n", "\n").replace(TATWEEL, "")
     text = BROKEN_AL.sub(r"\1ال\2", text)
     text = text.translate(SWAP_PARENTHESES)
     text = DOT_LEADER.sub(" ", text)

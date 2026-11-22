@@ -7,29 +7,31 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from . import config
 from .pdf import file_hash, read_manifest, read_pages
 
-TITLE = re.compile(
+LEGAL_TITLE = re.compile(
     r"^(?:ظهير شريف|مرسوم|قرار|مقرر|قانون)[^.]{0,200}?رقم\s*(\d[\d.]*\d)\s+صادر",
     re.M,
 )
-TEXT_END = re.compile(r"حرر ب")
-# A real new text starts right after the signature block of the previous one.
-# A decree quoted in the middle of a long text does not, so it is not a new text.
-MAX_SIGNATURE_GAP = 1500
+TEXT_END = re.compile(r"حرر\s*ب")
+
+# The last section of an issue holds studies, notices and extracts: no decree number, no signature.
+# "إعلانات وبلاغات" is often extracted as "إعالنات وبالغات".
+ANNOUNCEMENTS_SECTION = re.compile(r"إع(?:ال|لا)نات و(?:بال|بلا)غات")
+ANNOUNCEMENT_TITLE = re.compile(r"^(?:دراسة|مستخرج من)", re.M)
 
 
 def find_titles(full_text):
-    ends = [match.end() for match in TEXT_END.finditer(full_text)]
+    """Return (start offset, text number) for every legal text; announcements have no number."""
+    section = ANNOUNCEMENTS_SECTION.search(full_text)
+    legal_part_end = section.start() if section else len(full_text)
+
     titles = []
-    for title in TITLE.finditer(full_text):
-        previous = bisect.bisect_left(ends, title.start())
-        last_end = ends[previous - 1] if previous else None
-        right_after_an_end = (
-            last_end is not None
-            and (not titles or last_end > titles[-1].start())
-            and title.start() - last_end < MAX_SIGNATURE_GAP
-        )
-        if not titles or right_after_an_end:
-            titles.append(title)
+    for match in LEGAL_TITLE.finditer(full_text, 0, legal_part_end):
+        # a decree quoted inside a text is not a new text: the previous one must be signed first
+        if not titles or TEXT_END.search(full_text, titles[-1][0], match.start()):
+            titles.append((match.start(), match.group(1)))
+
+    if section:
+        titles += [(match.start(), "") for match in ANNOUNCEMENT_TITLE.finditer(full_text, section.end())]
     return titles
 
 
@@ -52,10 +54,10 @@ def chunk_document(pages, meta):
     )
 
     titles = find_titles(full_text)
-    bounds = [title.start() for title in titles] + [len(full_text)]
+    ends = [start for start, _ in titles[1:]] + [len(full_text)]
 
     chunks = []
-    for title_match, start, end in zip(titles, bounds, bounds[1:]):
+    for (start, text_number), end in zip(titles, ends):
         legal_text = full_text[start:end].rstrip()
         title = " ".join(legal_text[:200].split())
 
@@ -69,7 +71,7 @@ def chunk_document(pages, meta):
                 "text": text if i == 0 else f"{title}\n{text}",
                 **meta,
                 "title": title,
-                "text_number": title_match.group(1),
+                "text_number": text_number,
                 "page_start": page_at(offset),
                 "page_end": page_at(offset + len(text) - 1),
             })
