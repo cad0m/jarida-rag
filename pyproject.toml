@@ -1,0 +1,23 @@
+[project]
+name = "jarida-rag"
+version = "0.1.0"
+description = "RAG over the Moroccan Official Gazette (الجريدة الرسمية)"
+requires-python = ">=3.10"
+dependencies = [
+    "pypdfium2",
+    "langchain-text-splitters",
+    "sentence-transformers",
+    "qdrant-client>=1.10",
+    "transformers>=4.51",
+    "accelerate",
+    "bitsandbytes",
+    "mlflow",
+    "pandas",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
