@@ -18,11 +18,18 @@ CHUNK_OVERLAP = 150
 MIN_CHUNK_CHARS = 30
 TOP_K = 5
 MAX_CHUNKS_PER_TEXT = 2
+RERANK_CANDIDATES = 20
 
 EMBED_MODEL = "BAAI/bge-m3"
 EMBED_DEVICE = "cuda:0"
 EMBED_BATCH = 16
+RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 
 LLM_MODEL = "Qwen/Qwen3-8B"
 LLM_DEVICE = "cuda:1"
 MAX_NEW_TOKENS = 768
+
+# A different model family from the answering LLM, so it doesn't grade its own answers
+JUDGE_MODEL = "google/gemma-4-12B-it"
+JUDGE_DEVICE = "cuda:1"
+JUDGE_MAX_TOKENS = 1024

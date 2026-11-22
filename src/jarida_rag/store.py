@@ -1,5 +1,5 @@
 from qdrant_client import QdrantClient, models
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import CrossEncoder, SentenceTransformer
 
 from . import config
 from .chunk import chunk_all
@@ -11,6 +11,10 @@ def load_embedder():
     if config.EMBED_DEVICE.startswith("cuda"):
         embedder.half()
     return embedder
+
+
+def load_reranker():
+    return CrossEncoder(config.RERANKER_MODEL, device=config.EMBED_DEVICE, max_length=1024)
 
 
 def embed(embedder, texts):
@@ -41,7 +45,7 @@ def build_index(client, embedder):
     return len(chunks)
 
 
-def search(client, embedder, question, limit=config.TOP_K):
+def search(client, embedder, question, reranker=None, limit=config.TOP_K):
     vector = embed(embedder, [question])[0]
     # shortcut: a fixed candidate pool; switch to Qdrant's query_points_groups when the corpus grows
     hits = client.query_points(config.COLLECTION, query=vector.tolist(), limit=limit * 20).points
@@ -54,4 +58,9 @@ def search(client, embedder, question, limit=config.TOP_K):
         per_text[key] = per_text.get(key, 0) + 1
         if per_text[key] <= config.MAX_CHUNKS_PER_TEXT:
             results.append(hit.payload)
+
+    if reranker:
+        candidates = results[:config.RERANK_CANDIDATES]
+        scores = reranker.predict([(question, hit["text"]) for hit in candidates])
+        results = [hit for _, hit in sorted(zip(scores, candidates), key=lambda pair: pair[0], reverse=True)]
     return results[:limit]

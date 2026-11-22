@@ -5,7 +5,11 @@ description = "RAG over the Moroccan Official Gazette (الجريدة الرسم
 requires-python = ">=3.10"
 dependencies = [
     "pypdfium2",
-    "langchain-text-splitters",
+    "ragas==0.2.15",
+    "langchain-community<0.4",
+    "langchain-core<1",
+    "langchain-text-splitters<1",
+    "langchain-huggingface<1",
     "sentence-transformers",
     "qdrant-client>=1.10",
     "transformers>=4.51",

@@ -11,25 +11,30 @@ Rules:
 1. Answer only from the provided context. Never use outside knowledge.
 2. Answer in the language of the question: formal Arabic for Arabic questions, English for English questions.
 3. Copy decree numbers, law numbers and dates exactly as written in the context. In English answers, translate مرسوم as "decree", قرار as "order", ظهير شريف as "dahir" and قانون as "law".
-4. After each fact, cite its source exactly as written in the context, like this: [BO 7470, p. 24].
+4. After each fact, cite its source exactly as written in the context, like this: [BO 7470, 2.24.830, المادة 5, p. 8].
 5. If several legal texts in the context are relevant, name each one separately.
 6. If the context does not contain the answer, say so clearly in the language of the question. Do not guess.
 7. The context comes from PDF extraction and may contain small spelling errors in Arabic. Ignore them, but never change numbers.
 8. Be concise and direct."""
 
 
-def load_llm():
-    tokenizer = AutoTokenizer.from_pretrained(config.LLM_MODEL)
+def load_llm(model_id=config.LLM_MODEL, device=config.LLM_DEVICE, compute_dtype=torch.float16):
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = AutoModelForCausalLM.from_pretrained(
-        config.LLM_MODEL,
+        model_id,
         quantization_config=BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_compute_dtype=compute_dtype,
         ),
-        device_map={"": config.LLM_DEVICE},
+        device_map={"": device},
     )
     return tokenizer, model
+
+
+def source(hit):
+    parts = [f"BO {hit['issue']}", hit["text_number"], f"المادة {hit['article']}" if hit["article"] else "", f"p. {hit['page_start']}"]
+    return "[" + ", ".join(part for part in parts if part) + "]"
 
 
 def generate(tokenizer, model, messages):
@@ -55,15 +60,16 @@ def generate(tokenizer, model, messages):
     return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
 
-def answer(question, client, embedder, tokenizer, model):
+def answer(question, client, embedder, tokenizer, model, reranker=None):
     with mlflow.start_span(name="answer") as span:
         span.set_inputs({"question": question})
 
         with mlflow.start_span(name="retrieve") as retrieve_span:
-            hits = search(client, embedder, question)
-            retrieve_span.set_outputs([f"BO {hit['issue']} p.{hit['page_start']} | {hit['title'][:80]}" for hit in hits])
+            retrieve_span.set_attribute("reranker", bool(reranker))
+            hits = search(client, embedder, question, reranker)
+            retrieve_span.set_outputs([f"{source(hit)} {hit['title'][:80]}" for hit in hits])
 
-        context = "\n\n".join(f"[BO {hit['issue']}, p. {hit['page_start']}] {hit['text']}" for hit in hits)
+        context = "\n\n".join(f"{source(hit)} {hit['text']}" for hit in hits)
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"},

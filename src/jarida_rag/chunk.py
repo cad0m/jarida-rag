@@ -22,6 +22,10 @@ ANNOUNCEMENT_TITLE = re.compile(r"^(?:دراسة|مستخرج من)", re.M)
 # "رأي" (opinion) also starts lines that quote other opinions, so it only counts right after the section header
 FIRST_ANNOUNCEMENT = re.compile(r"^(?:دراسة|مستخرج من|رأي)", re.M)
 
+# An article heading is alone on its line ("المادة 2") or followed by a dash ("المادة الثانية. - ...").
+# Quoted articles of an amended text start with "»" and references like "المادة 16 من القانون" go on, so both are ignored.
+ARTICLE_HEADING = re.compile(r"^المادة[ \t]+([^\s.]+)\.?[ \t]*(?:-|$)", re.M)
+
 
 def find_titles(full_text):
     """Return (start offset, text number) for every legal text; announcements have no number."""
@@ -66,18 +70,24 @@ def chunk_document(pages, meta):
     for (start, text_number), end in zip(titles, ends):
         legal_text = full_text[start:end].rstrip()
         title = " ".join(legal_text[:200].split())
+        headings = [(match.start(), match.group(1)) for match in ARTICLE_HEADING.finditer(legal_text)]
+        heading_starts = [position for position, _ in headings]
 
         for i, piece in enumerate(splitter.create_documents([legal_text])):
             text = piece.page_content
             if len(text) < config.MIN_CHUNK_CHARS:
                 continue
             offset = start + piece.metadata["start_index"]
+            # the article the chunk starts in; later articles inside the chunk keep their heading in the text
+            previous = bisect.bisect_right(heading_starts, piece.metadata["start_index"])
+            article = headings[previous - 1][1] if previous else ""
             chunks.append({
                 "id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{meta['doc_id']}:{len(chunks)}")),
                 "text": text if i == 0 else f"{title}\n{text}",
                 **meta,
                 "title": title,
                 "text_number": text_number,
+                "article": article,
                 "page_start": page_at(offset),
                 "page_end": page_at(offset + len(text) - 1),
             })
