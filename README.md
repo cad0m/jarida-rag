@@ -25,6 +25,15 @@ Settings (models, chunk size, top-k, GPUs) are plain variables in `src/jarida_ra
   title for studies and notices. Leave it empty for questions the gazette can't answer.
 - Experiments and traces are logged to MLflow on DagsHub (local `work/mlflow.db` when no `MLFLOW_TRACKING_URI` is set).
 
+## Known limits
+
+Tested on issues 7467, 7470 and 7497, where every numbered text in the printed table of contents is detected.
+Not usable yet with text extraction:
+
+- Scanned issues (pages are images, no text layer), e.g. 5801, 6121, 6434, 6750: need OCR.
+- Older issues typeset with a non-Unicode Arabic font (e.g. 5391, 5602): extracted text is garbage.
+- Issues 7167, 7168, 7401, 7439, 7441: body text is fine but bold title lines come out scrambled (`2.52.136` for `2.25.136`).
+
 ## Run on Kaggle (GPU T4 x2)
 
 Turn on internet in the notebook settings, then run `notebooks/kaggle.ipynb` top to bottom.

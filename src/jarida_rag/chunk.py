@@ -5,18 +5,22 @@ import uuid
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from . import config
-from .pdf import file_hash, read_manifest, read_pages
+from .pdf import file_hash, read_manifest, read_pages, read_toc
 
 LEGAL_TITLE = re.compile(
-    r"^(?:ظهير شريف|مرسوم|قرار|مقرر|قانون)[^.]{0,200}?رقم\s*(\d[\d.]*\d)\s+صادر",
+    r"^(?:بموجب )?(?:ظهير شريف|مرسوم|قرار|مقرر|قانون)[^.]{0,200}?رقم\s*(\d[\d.]*\d)\s+صادر",
     re.M,
 )
-TEXT_END = re.compile(r"حرر\s*ب")
+# A text ends with its signature, a "* * *" separator between short notices, a new section header,
+# or an erratum ("استدراك") correcting an earlier issue.
+TEXT_END = re.compile(r"حرر\s*ب|\*\s*\*|^نصوص (?:عامة|خاصة)|^استدراك", re.M)
 
 # The last section of an issue holds studies, notices and extracts: no decree number, no signature.
 # "إعلانات وبلاغات" is often extracted as "إعالنات وبالغات".
 ANNOUNCEMENTS_SECTION = re.compile(r"إع(?:ال|لا)نات و(?:بال|بلا)غات")
 ANNOUNCEMENT_TITLE = re.compile(r"^(?:دراسة|مستخرج من)", re.M)
+# "رأي" (opinion) also starts lines that quote other opinions, so it only counts right after the section header
+FIRST_ANNOUNCEMENT = re.compile(r"^(?:دراسة|مستخرج من|رأي)", re.M)
 
 
 def find_titles(full_text):
@@ -30,8 +34,10 @@ def find_titles(full_text):
         if not titles or TEXT_END.search(full_text, titles[-1][0], match.start()):
             titles.append((match.start(), match.group(1)))
 
-    if section:
-        titles += [(match.start(), "") for match in ANNOUNCEMENT_TITLE.finditer(full_text, section.end())]
+    first = FIRST_ANNOUNCEMENT.search(full_text, section.end()) if section else None
+    if first:
+        titles.append((first.start(), ""))
+        titles += [(match.start(), "") for match in ANNOUNCEMENT_TITLE.finditer(full_text, first.end())]
     return titles
 
 
@@ -97,3 +103,10 @@ if __name__ == "__main__":
     for (issue, title), parts in texts.items():
         pages = f"p.{parts[0]['page_start']}-{parts[-1]['page_end']}"
         print(f"BO {issue} {pages:10} {len(parts):3} chunks | {title[:90]}")
+
+    # the printed table of contents is a free answer key for the text detection
+    print("\nTable of contents check:")
+    for row in read_manifest():
+        expected = set(re.findall(r"رقم\s*(\d[\d.]*\d)\s+صادر", read_toc(config.PDF_DIR / row["filename"])))
+        found = {chunk["text_number"] for chunk in chunks if chunk["issue"] == row["issue"]} - {""}
+        print(f"BO {row['issue']}: {len(expected)} in TOC, missing {sorted(expected - found)}, not in TOC {sorted(found - expected)}")

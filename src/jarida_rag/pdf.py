@@ -48,6 +48,13 @@ def arabic_ratio(text):
     return len(ARABIC_LETTER.findall(text)) / len(characters)
 
 
+def read_toc(path):
+    pdf = pdfium.PdfDocument(path)
+    texts = [clean_text(pdf[index].get_textpage().get_text_range()) for index in range(len(pdf))]
+    pdf.close()
+    return "\n".join(text for text in texts if TOC_MARKER.search(text))
+
+
 def read_pages(path, issue):
     pdf = pdfium.PdfDocument(path)
     pages = []

@@ -43,7 +43,8 @@ def build_index(client, embedder):
 
 def search(client, embedder, question, limit=config.TOP_K):
     vector = embed(embedder, [question])[0]
-    hits = client.query_points(config.COLLECTION, query=vector.tolist(), limit=limit * 4).points
+    # shortcut: a fixed candidate pool; switch to Qdrant's query_points_groups when the corpus grows
+    hits = client.query_points(config.COLLECTION, query=vector.tolist(), limit=limit * 20).points
 
     # keep a few chunks per legal text, so one long decree can't fill the whole context
     results = []
