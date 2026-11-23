@@ -17,7 +17,8 @@ class LocalChatModel(ChatHuggingFace):
 
 
 def load_judge():
-    tokenizer, model = load_llm(config.JUDGE_MODEL, config.JUDGE_DEVICE, torch.float32)
+    # fp16 is ~3x faster than fp32 on a T4; if the judge's raw output turns into garbage or nan_rate jumps, go back to torch.float32
+    tokenizer, model = load_llm(config.JUDGE_MODEL, config.JUDGE_DEVICE, torch.float16)
     generator = pipeline(
         "text-generation",
         model=model,
