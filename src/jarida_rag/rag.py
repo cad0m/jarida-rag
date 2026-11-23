@@ -5,7 +5,11 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from . import config
 from .store import search
 
-SYSTEM_PROMPT = """You are a legal assistant specialized in the Moroccan Official Gazette (الجريدة الرسمية).
+# Fixed sentences, so a refusal can be detected exactly instead of guessed from keywords
+NOT_FOUND_EN = "The gazette documents provided do not contain this information."
+NOT_FOUND_AR = "لا تتضمن وثائق الجريدة الرسمية المقدمة هذه المعلومة."
+
+SYSTEM_PROMPT = f"""You are a legal assistant specialized in the Moroccan Official Gazette (الجريدة الرسمية).
 
 Rules:
 1. Answer only from the provided context. Never use outside knowledge.
@@ -13,7 +17,9 @@ Rules:
 3. Copy decree numbers, law numbers and dates exactly as written in the context. In English answers, translate مرسوم as "decree", قرار as "order", ظهير شريف as "dahir" and قانون as "law".
 4. After each fact, cite its source exactly as written in the context, like this: [BO 7470, 2.24.830, المادة 5, p. 8].
 5. If several legal texts in the context are relevant, name each one separately.
-6. If the context does not contain the answer, say so clearly in the language of the question. Do not guess.
+6. If the context does not contain the answer, reply with exactly this sentence and nothing else, even if you know the answer from elsewhere:
+   English: {NOT_FOUND_EN}
+   Arabic: {NOT_FOUND_AR}
 7. The context comes from PDF extraction and may contain small spelling errors in Arabic. Ignore them, but never change numbers.
 8. Be concise and direct."""
 
@@ -66,19 +72,16 @@ def answer(question, client, embedder, tokenizer, model, reranker=None):
         span.set_inputs({"question": question})
 
         with mlflow.start_span(name="retrieve") as retrieve_span:
-            retrieve_span.set_attribute("reranker", bool(reranker))
             hits = search(client, embedder, question, reranker)
-            retrieve_span.set_outputs([f"{source(hit)} {hit['title'][:80]}" for hit in hits])
+            retrieve_span.set_outputs([source(hit) for hit in hits])
 
         context = "\n\n".join(f"{source(hit)} {hit['text']}" for hit in hits)
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"},
         ]
-        with mlflow.start_span(name="generate") as generate_span:
-            generate_span.set_inputs({"prompt": messages[1]["content"]})
+        with mlflow.start_span(name="generate"):
             reply = generate(tokenizer, model, messages)
-            generate_span.set_outputs(reply)
 
         span.set_outputs(reply)
     return reply, hits

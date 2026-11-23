@@ -45,22 +45,24 @@ def build_index(client, embedder):
     return len(chunks)
 
 
-def search(client, embedder, question, reranker=None, limit=config.TOP_K):
+def search(client, embedder, question, reranker=None):
     vector = embed(embedder, [question])[0]
-    # shortcut: a fixed candidate pool; switch to Qdrant's query_points_groups when the corpus grows
-    hits = client.query_points(config.COLLECTION, query=vector.tolist(), limit=limit * 20).points
+    # shortcut: a fixed pool of 100 candidates; switch to Qdrant's query_points_groups when the corpus grows
+    hits = client.query_points(config.COLLECTION, query=vector.tolist(), limit=100).points
 
-    # keep a few chunks per legal text, so one long decree can't fill the whole context
+    # keep at most a few chunks per legal text, so one long decree can't fill the whole context
     results = []
     per_text = {}
     for hit in hits:
-        key = (hit.payload["doc_id"], hit.payload["title"])
-        per_text[key] = per_text.get(key, 0) + 1
-        if per_text[key] <= config.MAX_CHUNKS_PER_TEXT:
+        text_key = (hit.payload["doc_id"], hit.payload["title"])
+        per_text[text_key] = per_text.get(text_key, 0) + 1
+        if per_text[text_key] <= config.MAX_CHUNKS_PER_TEXT:
             results.append(hit.payload)
 
     if reranker:
         candidates = results[:config.RERANK_CANDIDATES]
         scores = reranker.predict([(question, hit["text"]) for hit in candidates])
-        results = [hit for _, hit in sorted(zip(scores, candidates), key=lambda pair: pair[0], reverse=True)]
-    return results[:limit]
+        best_first = scores.argsort()[::-1]
+        results = [candidates[i] for i in best_first]
+
+    return results[:config.TOP_K]

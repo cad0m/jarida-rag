@@ -10,12 +10,8 @@ from ragas.metrics import Faithfulness, LLMContextPrecisionWithReference, LLMCon
 from ragas.run_config import RunConfig
 
 from . import config
-from .rag import answer, source
+from .rag import NOT_FOUND_AR, NOT_FOUND_EN, answer, source
 from .store import search
-
-# shortcut: keyword match to spot "the documents don't say"; check answers.json if refusal_accuracy looks wrong
-REFUSAL_WORDS = ["does not contain", "do not contain", "no information", "not mentioned",
-                 "لا يحتوي", "لا تحتوي", "لا يتضمن", "لا تتضمن", "لا توجد", "غير متوفر"]
 
 
 def read_questions():
@@ -57,13 +53,19 @@ def retrieval_eval(client, embedder, run_name, reranker=None):
         hits = search(client, embedder, question["question"], reranker)
         seconds = time.time() - start
 
-        right_text = [hit["issue"] == question["issue"] and question["expected"] in hit["title"] for hit in hits]
+        is_right_text = [hit["issue"] == question["issue"] and question["expected"] in hit["title"] for hit in hits]
+        rank = is_right_text.index(True) + 1 if any(is_right_text) else None
+
+        evidence_found = None  # some questions have no evidence phrase
+        if question["evidence"]:
+            evidence_found = any(contains(hit["text"], question["evidence"]) for hit in hits)
+
         rows.append({
             "question": question["question"],
             "expected": question["expected"],
             "retrieved": " | ".join(hit["text_number"] or hit["title"][:30] for hit in hits),
-            "rank": right_text.index(True) + 1 if any(right_text) else None,
-            "evidence_found": any(contains(hit["text"], question["evidence"]) for hit in hits) if question["evidence"] else None,
+            "rank": rank,
+            "evidence_found": evidence_found,
             "seconds": seconds,
         })
 
@@ -96,7 +98,7 @@ def answer_questions(client, embedder, tokenizer, model, reranker=None):
             # exactly what the LLM saw, citation labels included, so the judge can check the citations too
             "contexts": [f"{source(hit)} {hit['text']}" for hit in hits],
             "should_refuse": should_refuse,
-            "refused": any(word in reply.lower() for word in REFUSAL_WORDS),
+            "refused": NOT_FOUND_EN in reply or NOT_FOUND_AR in reply,
             "seconds": time.time() - start,
         })
     return answers
