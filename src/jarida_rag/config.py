@@ -35,4 +35,4 @@ MAX_NEW_TOKENS = 768
 JUDGE_MODEL = "google/gemma-4-12B-it"
 JUDGE_DEVICE = "cuda:0"
 JUDGE_EMBED_DEVICE = "cuda:1"
-JUDGE_MAX_TOKENS = 1024
+JUDGE_MAX_TOKENS = 2048  # faithfulness lists every claim as JSON; 1024 cut long answers mid-JSON

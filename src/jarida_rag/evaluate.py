@@ -10,7 +10,7 @@ from ragas.metrics import Faithfulness, LLMContextPrecisionWithReference, LLMCon
 from ragas.run_config import RunConfig
 
 from . import config
-from .rag import answer
+from .rag import answer, source
 from .store import search
 
 # shortcut: keyword match to spot "the documents don't say"; check answers.json if refusal_accuracy looks wrong
@@ -93,7 +93,8 @@ def answer_questions(client, embedder, tokenizer, model, reranker=None):
             "question": question["question"],
             "reference": question["reference"],
             "answer": reply,
-            "contexts": [hit["text"] for hit in hits],
+            # exactly what the LLM saw, citation labels included, so the judge can check the citations too
+            "contexts": [f"{source(hit)} {hit['text']}" for hit in hits],
             "should_refuse": should_refuse,
             "refused": any(word in reply.lower() for word in REFUSAL_WORDS),
             "seconds": time.time() - start,

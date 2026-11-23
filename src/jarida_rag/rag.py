@@ -27,7 +27,7 @@ def load_llm(model_id=config.LLM_MODEL, device=config.LLM_DEVICE, compute_dtype=
             bnb_4bit_quant_type="nf4",
             bnb_4bit_compute_dtype=compute_dtype,
         ),
-        dtype=compute_dtype,  # the layers 4-bit doesn't cover (embeddings, norms) would otherwise load in float32
+        torch_dtype=compute_dtype,  # the layers 4-bit doesn't cover (embeddings, norms) would otherwise load in float32
         device_map={"": device},
     )
     return tokenizer, model
