@@ -27,5 +27,5 @@ def load_judge():
         return_full_text=False,  # only the new text, which RAGAS parses as JSON
     )
     judge = LocalChatModel(llm=HuggingFacePipeline(pipeline=generator, model_id=config.JUDGE_MODEL), tokenizer=tokenizer)
-    embeddings = HuggingFaceEmbeddings(model_name=config.EMBED_MODEL, model_kwargs={"device": config.EMBED_DEVICE})
+    embeddings = HuggingFaceEmbeddings(model_name=config.EMBED_MODEL, model_kwargs={"device": config.JUDGE_EMBED_DEVICE})
     return judge, embeddings

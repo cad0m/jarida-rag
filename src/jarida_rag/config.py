@@ -29,7 +29,10 @@ LLM_MODEL = "Qwen/Qwen3-8B"
 LLM_DEVICE = "cuda:1"
 MAX_NEW_TOKENS = 768
 
-# A different model family from the answering LLM, so it doesn't grade its own answers
+# A different model family from the answering LLM, so it doesn't grade its own answers.
+# The judge runs after everything else is freed: transformers pipelines move their model to GPU 0 anyway,
+# so the judge goes there on purpose and the RAGAS embeddings use GPU 1.
 JUDGE_MODEL = "google/gemma-4-12B-it"
-JUDGE_DEVICE = "cuda:1"
+JUDGE_DEVICE = "cuda:0"
+JUDGE_EMBED_DEVICE = "cuda:1"
 JUDGE_MAX_TOKENS = 1024
