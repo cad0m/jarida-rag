@@ -1,49 +1,59 @@
 # jarida-rag
 
 Ask legal questions in Arabic or English about the Moroccan Official Gazette (الجريدة الرسمية) and get answers
-with citations like `[BO 7470, p. 24]`.
+grounded in the gazette, with a citation for every fact: `[BO 7470, 2.24.830, المادة 5, p. 8]`.
 
-**Status:** milestone 1, working on a handful of born-digital Arabic issues before scaling year by year.
+**Status:** working end to end on three born-digital issues (7467, 7470, 7497), evaluated with RAGAS and tracked in MLflow.
 
 ## How it works
 
 | Step | File | What it does |
 |---|---|---|
-| Extract | `src/jarida_rag/pdf.py` | PDF → clean pages with pypdfium2 (fixes broken Arabic ligatures, skips table-of-contents and unreadable pages) |
-| Chunk | `src/jarida_rag/chunk.py` | Pages → legal texts (decrees, orders, dahirs) → chunks with metadata |
-| Index | `src/jarida_rag/store.py` | BGE-M3 embeddings in a local Qdrant collection |
-| Answer | `src/jarida_rag/rag.py` | Retrieve the top chunks, answer with Qwen3-8B (4-bit), traced in MLflow |
-| Evaluate | `src/jarida_rag/evaluate.py` | Hit rate and MRR on `data/questions.csv`, logged to MLflow |
+| Extract | `src/jarida_rag/pdf.py` | PDF → clean page text with pypdfium2: crops the running header by position, repairs broken Arabic ligatures (`إعالن` → `إعلان`), mirrored brackets and reversed Latin words, and flags every page it doesn't keep |
+| Chunk | `src/jarida_rag/chunk.py` | Pages → legal texts (decrees, orders, notices, studies) → chunks split by article, each labelled with its decree number, article and pages |
+| Index | `src/jarida_rag/store.py` | BGE-M3 embeddings in Postgres + pgvector; search keeps at most 2 chunks per legal text, then an optional BGE cross-encoder reranks them |
+| Answer | `src/jarida_rag/rag.py` | Qwen3-8B (4-bit) answers only from the retrieved context and refuses with a fixed sentence when the answer isn't there; each answer is traced in MLflow |
+| Evaluate | `src/jarida_rag/evaluate.py`, `judge.py` | Retrieval metrics (hit rate, MRR, evidence recall) on 51 questions; RAGAS (faithfulness, answer relevancy, context precision and recall) with Gemma 4 as an independent judge |
 
-Settings (models, chunk size, top-k, GPUs) are plain variables in `src/jarida_rag/config.py`.
+Settings (models, chunking, top-k, GPUs) are plain variables in `src/jarida_rag/config.py`.
+
+## Results (3 issues, final system with reranker)
+
+| Metric | Value |
+|---|---|
+| Faithfulness | 0.94 |
+| Context precision / recall | 1.00 / 0.97 |
+| Refusals on out-of-scope questions | 3 / 3 |
+| Retrieval MRR (51 questions) | 0.96 |
+
+The reranker raised context precision from 0.95 to 1.00 for about 1.5 s more per question.
+Scores are on a small, easy corpus; faithfulness does not measure correctness (two answers misread a number in a correctly retrieved text).
 
 ## Data
 
-- PDFs are not in git. Put them in `data/` locally, or attach them as a Kaggle dataset.
-- `data/manifest.csv`: one row per PDF (`filename, issue, date, lang`).
-- `data/questions.csv`: evaluation questions. `expected` is the decree number that answers it, or a phrase from the
-  title for studies and notices. Leave it empty for questions the gazette can't answer.
-- Experiments and traces are logged to MLflow on DagsHub (local `work/mlflow.db` when no `MLFLOW_TRACKING_URI` is set).
-
-## Known limits
-
-Tested on issues 7467, 7470 and 7497, where every numbered text in the printed table of contents is detected.
-Not usable yet with text extraction:
-
-- Scanned issues (pages are images, no text layer), e.g. 5801, 6121, 6434, 6750: need OCR.
-- Older issues typeset with a non-Unicode Arabic font (e.g. 5391, 5602): extracted text is garbage.
-- Issues 7167, 7168, 7401, 7439, 7441: body text is fine but bold title lines come out scrambled (`2.52.136` for `2.25.136`).
+- PDFs are not in git: put them in `data/`, or attach them as a Kaggle dataset.
+- `data/manifest.csv`: one row per issue (`filename, issue, date, lang`).
+- `data/questions.csv`: the golden set. `expected` is the decree number (or title phrase) that answers the question,
+  `evidence` an exact phrase from the gazette containing the answer, `reference` a reference answer for RAGAS.
+  Questions with an empty `expected` have no answer in the corpus.
 
 ## Run on Kaggle (GPU T4 x2)
 
-Turn on internet in the notebook settings, then run `notebooks/kaggle.ipynb` top to bottom.
-The embedder goes on GPU 0, the LLM on GPU 1.
+Add these Kaggle secrets: `NEON_DATABASE_URL` (Postgres with pgvector), `DAGSHUB_TOKEN` (MLflow) and `HF_TOKEN`
+(the Gemma judge is gated). Then run `notebooks/kaggle.ipynb` top to bottom.
+`notebooks/chunking_lab.ipynb` compares chunking variants on retrieval in a few minutes, without the LLM or the database.
 
-## Run locally (CPU, no LLM)
+## Run locally (CPU, extraction and chunking only)
 
 ```bash
 pip install -e .
 python -X utf8 -m jarida_rag.chunk
 ```
 
-This prints every detected legal text with its pages, which is the way to check extraction and chunking.
+Prints every detected legal text with its pages and checks them against each issue's printed table of contents.
+
+## Known limits
+
+- Scanned issues (no text layer) need OCR, and older issues typeset in a non-Unicode Arabic font extract as garbage.
+- Some recent issues (7167, 7168, 7401, 7439, 7441) extract body text correctly but scramble bold title lines.
+- Study and opinion pages keep some line fragments out of order, with footnotes mixed into the text.

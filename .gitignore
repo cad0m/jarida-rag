@@ -4,4 +4,6 @@ __pycache__/
 *.egg-info/
 .venv/
 .ipynb_checkpoints/
-/docs 
+/docs
+/test
+test_output*.txt

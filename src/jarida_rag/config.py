@@ -8,14 +8,23 @@ WORK_DIR.mkdir(parents=True, exist_ok=True)
 
 MANIFEST = REPO_DIR / "data" / "manifest.csv"
 QUESTIONS = REPO_DIR / "data" / "questions.csv"
-QDRANT_DIR = WORK_DIR / "qdrant"
 MLFLOW_URI = os.environ.get("MLFLOW_TRACKING_URI", f"sqlite:///{(WORK_DIR / 'mlflow.db').as_posix()}")
-COLLECTION = "gazette"
+DATABASE_URL = os.environ.get("DATABASE_URL")  # Postgres + pgvector (Neon); never written in the code
+TABLE = "chunks"
 
-MIN_ARABIC_RATIO = 0.5
+# The running header sits above 91% of the page height. Measured on 7467/7470/7497: header boxes start at 0.918,
+# body text ends at 0.905, so the margin is thin; recheck when adding issues from other years or layouts.
+HEADER_LINE = 0.91
+MIN_PAGE_CHARS = 50  # fewer characters: a scan, map or figure
+MIN_ARABIC_RATIO = 0.5  # below: a table or French page, kept but flagged
+MIN_DOCUMENT_ARABIC_RATIO = 0.3  # below, for the median page: the whole issue is unreadable
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 150
 MIN_CHUNK_CHARS = 30
+# Chunking switches, compared in notebooks/chunking_lab.ipynb
+CHUNK_HEADER = "short"  # "short": one-line real title on every chunk; "first_200": the old 200-character prefix
+UNWRAP_LINES = True  # join PDF line wraps so chunks end on sentences, not mid-line
+SPLIT_PREAMBLE = True  # chunk the preamble ("بناء على ...") apart from the articles
 TOP_K = 5
 MAX_CHUNKS_PER_TEXT = 2
 RERANK_CANDIDATES = 20

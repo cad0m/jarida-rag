@@ -33,7 +33,7 @@ def load_llm(model_id=config.LLM_MODEL, device=config.LLM_DEVICE, compute_dtype=
             bnb_4bit_quant_type="nf4",
             bnb_4bit_compute_dtype=compute_dtype,
         ),
-        torch_dtype=compute_dtype,  # the layers 4-bit doesn't cover (embeddings, norms) would otherwise load in float32
+        dtype=compute_dtype,  # the layers 4-bit doesn't cover (embeddings, norms) would otherwise load in float32
         device_map={"": device},
     )
     return tokenizer, model
@@ -67,12 +67,12 @@ def generate(tokenizer, model, messages):
     return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
 
-def answer(question, client, embedder, tokenizer, model, reranker=None):
+def answer(question, pool, embedder, tokenizer, model, reranker=None):
     with mlflow.start_span(name="answer") as span:
         span.set_inputs({"question": question})
 
         with mlflow.start_span(name="retrieve") as retrieve_span:
-            hits = search(client, embedder, question, reranker)
+            hits = search(pool, embedder, question, reranker)
             retrieve_span.set_outputs([source(hit) for hit in hits])
 
         context = "\n\n".join(f"{source(hit)} {hit['text']}" for hit in hits)

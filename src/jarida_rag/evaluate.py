@@ -11,7 +11,6 @@ from ragas.run_config import RunConfig
 
 from . import config
 from .rag import NOT_FOUND_AR, NOT_FOUND_EN, answer, source
-from .store import search
 
 
 def read_questions():
@@ -34,54 +33,62 @@ def log_run(run_name, reranker_used, metrics, tables):
             "chunk_size": config.CHUNK_SIZE,
             "top_k": config.TOP_K,
             "max_chunks_per_text": config.MAX_CHUNKS_PER_TEXT,
+            "chunk_header": config.CHUNK_HEADER,
+            "unwrap_lines": config.UNWRAP_LINES,
+            "split_preamble": config.SPLIT_PREAMBLE,
         })
         mlflow.log_metrics(metrics)
         for name, table in tables.items():
             mlflow.log_table(table, name)
 
 
-def retrieval_eval(client, embedder, run_name, reranker=None):
-    """For every answerable question:
-    rank     = position of the first chunk from the right legal text
-    evidence = whether the chunk holding the answer itself was retrieved"""
+def retrieval_eval(search, run_name, reranker_used):
+    """`search(question)` returns the top chunks (from Postgres or from memory). For every answerable question:
+    rank          = position of the first chunk from the right legal text
+    evidence_rank = position of the first chunk holding the answer phrase itself (0 = not retrieved)"""
     rows = []
     for question in read_questions():
         if not question["expected"]:
             continue
 
         start = time.time()
-        hits = search(client, embedder, question["question"], reranker)
+        hits = search(question["question"])
         seconds = time.time() - start
 
         is_right_text = [hit["issue"] == question["issue"] and question["expected"] in hit["title"] for hit in hits]
         rank = is_right_text.index(True) + 1 if any(is_right_text) else None
 
-        evidence_found = None  # some questions have no evidence phrase
+        evidence_rank = None  # some questions have no evidence phrase
         if question["evidence"]:
-            evidence_found = any(contains(hit["text"], question["evidence"]) for hit in hits)
+            # checked against what the LLM reads: the source label and the chunk text
+            has_answer = [contains(f"{source(hit)} {hit['text']}", question["evidence"]) for hit in hits]
+            evidence_rank = has_answer.index(True) + 1 if any(has_answer) else 0
 
         rows.append({
             "question": question["question"],
             "expected": question["expected"],
             "retrieved": " | ".join(hit["text_number"] or hit["title"][:30] for hit in hits),
             "rank": rank,
-            "evidence_found": evidence_found,
+            "evidence_rank": evidence_rank,
             "seconds": seconds,
         })
 
     table = pd.DataFrame(rows)
     ranks = table["rank"].astype(float)  # None (not found) becomes NaN
+    evidence_ranks = table["evidence_rank"].dropna().astype(float)
     metrics = {
         "hit_rate": ranks.notna().mean(),
         "mrr": (1 / ranks).fillna(0).mean(),
-        "evidence_recall": table["evidence_found"].dropna().astype(bool).mean(),
+        "evidence_recall": (evidence_ranks > 0).mean(),
+        # finer than mrr: rewards ranking the chunk that holds the answer, not just any chunk of the right text
+        "evidence_mrr": (1 / evidence_ranks.replace(0, float("inf"))).mean(),
         "avg_search_seconds": table["seconds"].mean(),
     }
-    log_run(run_name, bool(reranker), metrics, {"retrieval.json": table})
-    return table
+    log_run(run_name, reranker_used, metrics, {"retrieval.json": table})
+    return metrics
 
 
-def answer_questions(client, embedder, tokenizer, model, reranker=None):
+def answer_questions(pool, embedder, tokenizer, model, reranker=None):
     """Answers the questions that have a reference answer, plus the ones the gazette can't answer."""
     answers = []
     for question in read_questions():
@@ -90,7 +97,7 @@ def answer_questions(client, embedder, tokenizer, model, reranker=None):
             continue
 
         start = time.time()
-        reply, hits = answer(question["question"], client, embedder, tokenizer, model, reranker)
+        reply, hits = answer(question["question"], pool, embedder, tokenizer, model, reranker)
         answers.append({
             "question": question["question"],
             "reference": question["reference"],
@@ -123,8 +130,8 @@ def ragas_eval(answers, judge, judge_embeddings, run_name, reranker_used):
         metrics=metrics,
         llm=LangchainLLMWrapper(judge),
         embeddings=LangchainEmbeddingsWrapper(judge_embeddings),
-        run_config=RunConfig(max_workers=1, timeout=900),  
-        raise_exceptions=False, 
+        run_config=RunConfig(max_workers=1, timeout=900),
+        raise_exceptions=False,
     )
     scores = result.to_pandas()
     names = [metric.name for metric in metrics]
