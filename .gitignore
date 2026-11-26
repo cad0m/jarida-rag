@@ -1,4 +1,6 @@
 data/*.pdf
+# source files the golden set was built from (questions.csv is the checked version)
+data/bo_*_gold_*.csv
 work/
 __pycache__/
 *.egg-info/

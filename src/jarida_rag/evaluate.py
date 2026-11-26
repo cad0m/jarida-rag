@@ -1,4 +1,5 @@
 import csv
+import re
 import time
 
 import mlflow
@@ -11,6 +12,9 @@ from ragas.run_config import RunConfig
 
 from . import config
 from .rag import NOT_FOUND_AR, NOT_FOUND_EN, answer, source
+
+OUT_OF_SCOPE = "OUT_OF_SCOPE"  # `expected` of questions the gazette can't answer
+RAGAS_TYPES = ("attribute",)  # single-fact questions: about 15, which keeps the judge run near 80 minutes
 
 
 def read_questions():
@@ -48,25 +52,27 @@ def retrieval_eval(search, run_name, reranker_used):
     evidence_rank = position of the first chunk holding the answer phrase itself (0 = not retrieved)"""
     rows = []
     for question in read_questions():
-        if not question["expected"]:
+        if question["expected"] == OUT_OF_SCOPE:
             continue
 
         start = time.time()
         hits = search(question["question"])
         seconds = time.time() - start
 
-        is_right_text = [hit["issue"] == question["issue"] and question["expected"] in hit["title"] for hit in hits]
-        rank = is_right_text.index(True) + 1 if any(is_right_text) else None
+        # checked against what the LLM reads: the source label and the chunk text
+        has_answer = [contains(f"{source(hit)} {hit['text']}", question["evidence"]) for hit in hits]
+        evidence_rank = has_answer.index(True) + 1 if any(has_answer) else 0
 
-        evidence_rank = None  # some questions have no evidence phrase
-        if question["evidence"]:
-            # checked against what the LLM reads: the source label and the chunk text
-            has_answer = [contains(f"{source(hit)} {hit['text']}", question["evidence"]) for hit in hits]
-            evidence_rank = has_answer.index(True) + 1 if any(has_answer) else 0
+        references = [r for r in question["reference"].split("|") if r]  # multi-text questions: any of them counts
+        if references:
+            is_right_text = [hit["issue"] == question["issue"] and any(r in hit["title"] for r in references) for hit in hits]
+        else:
+            is_right_text = has_answer  # texts without a decree number (the CESE opinion): judged by the quote
+        rank = is_right_text.index(True) + 1 if any(is_right_text) else None
 
         rows.append({
             "question": question["question"],
-            "expected": question["expected"],
+            "reference": question["reference"],
             "retrieved": " | ".join(hit["text_number"] or hit["title"][:30] for hit in hits),
             "rank": rank,
             "evidence_rank": evidence_rank,
@@ -88,24 +94,39 @@ def retrieval_eval(search, run_name, reranker_used):
     return metrics
 
 
+def has_fact(reply, fact):
+    if re.fullmatch(r"[\d.,]+", fact):
+        # a number counts only as a whole number: "2" must not match inside "2.26.28"
+        return re.search(rf"(?<![\d.,]){re.escape(fact)}(?![\d]|[.,]\d)", reply) is not None
+    return contains(reply, fact)
+
+
+def has_key_facts(reply, key_fact):
+    """Every "&" part of the key fact appears in the answer, any of its "|" alternatives counting."""
+    reply = re.sub(r"\[[^\]]*\]", " ", reply)  # citation labels are full of numbers
+    return all(any(has_fact(reply, alternative.strip()) for alternative in part.split("|")) for part in key_fact.split("&"))
+
+
 def answer_questions(pool, embedder, tokenizer, model, reranker=None):
-    """Answers the questions that have a reference answer, plus the ones the gazette can't answer."""
+    """Answers the RAGAS questions (one fact to extract) and the ones the gazette can't answer."""
     answers = []
     for question in read_questions():
-        should_refuse = not question["expected"]
-        if not question["reference"] and not should_refuse:
+        should_refuse = question["expected"] == OUT_OF_SCOPE
+        if question["type"] not in RAGAS_TYPES and not should_refuse:
             continue
 
         start = time.time()
         reply, hits = answer(question["question"], pool, embedder, tokenizer, model, reranker)
         answers.append({
             "question": question["question"],
-            "reference": question["reference"],
+            "expected": question["expected"],
             "answer": reply,
             # exactly what the LLM saw, citation labels included, so the judge can check the citations too
             "contexts": [f"{source(hit)} {hit['text']}" for hit in hits],
             "should_refuse": should_refuse,
             "refused": NOT_FOUND_EN in reply or NOT_FOUND_AR in reply,
+            # deterministic correctness: RAGAS faithfulness can't tell a misread number from the right one
+            "facts_ok": None if should_refuse else has_key_facts(reply, question["key_fact"]),
             "seconds": time.time() - start,
         })
     return answers
@@ -119,7 +140,7 @@ def ragas_eval(answers, judge, judge_embeddings, run_name, reranker_used):
             "user_input": item["question"],
             "response": item["answer"],
             "retrieved_contexts": item["contexts"],
-            "reference": item["reference"],
+            "reference": item["expected"],
         }
         for item in golden
     ])
@@ -140,6 +161,7 @@ def ragas_eval(answers, judge, judge_embeddings, run_name, reranker_used):
     summary = {name: scores[name].mean() for name in names}
     summary["nan_rate"] = scores[names].isna().mean().mean()
     summary["refusal_accuracy"] = (answers_table["refused"] == answers_table["should_refuse"]).mean()
+    summary["fact_accuracy"] = answers_table["facts_ok"].dropna().astype(bool).mean()
     summary["avg_answer_seconds"] = answers_table["seconds"].mean()
 
     log_run(run_name, reranker_used, summary, {"ragas.json": scores, "answers.json": answers_table})

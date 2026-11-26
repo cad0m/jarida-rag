@@ -33,10 +33,9 @@ Scores are on a small, easy corpus; faithfulness does not measure correctness (t
 
 - PDFs are not in git: put them in `data/`, or attach them as a Kaggle dataset.
 - `data/manifest.csv`: one row per issue (`filename, issue, date, lang`).
-- `data/questions.csv`: the golden set. `expected` is the decree number (or title phrase) that answers the question,
-  `evidence` an exact phrase from the gazette containing the answer, `reference` a reference answer for RAGAS.
-  Questions with an empty `expected` have no answer in the corpus.
-
+- `data/questions.csv`: the golden set (86 questions, each checked against the extracted text).
+  `expected` is the normalized answer (`OUT_OF_SCOPE` when the gazette can't answer), `evidence` a verbatim quote,
+  `key_fact` the minimal fact a correct answer contains (`&` = and, `|` = or), `reference` the decree number(s).
 ## Run on Kaggle (GPU T4 x2)
 
 Add these Kaggle secrets: `NEON_DATABASE_URL` (Postgres with pgvector), `DAGSHUB_TOKEN` (MLflow) and `HF_TOKEN`
