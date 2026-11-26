@@ -18,8 +18,15 @@ dependencies = [
     "bitsandbytes",
     "mlflow",
     "pandas",
+    "rank-bm25",
     "wordfreq>=3.1.1",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [build-system]
 requires = ["setuptools>=61"]

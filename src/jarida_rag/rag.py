@@ -67,12 +67,12 @@ def generate(tokenizer, model, messages):
     return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
 
-def answer(question, pool, embedder, tokenizer, model, reranker=None):
+def answer(question, pool, embedder, tokenizer, model, reranker=None, lexical_index=None):
     with mlflow.start_span(name="answer") as span:
         span.set_inputs({"question": question})
 
         with mlflow.start_span(name="retrieve") as retrieve_span:
-            hits = search(pool, embedder, question, reranker)
+            hits = search(pool, embedder, question, reranker, lexical_index)
             retrieve_span.set_outputs([source(hit) for hit in hits])
 
         context = "\n\n".join(f"{source(hit)} {hit['text']}" for hit in hits)

@@ -5,10 +5,10 @@ import uuid
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from . import config
-from .pdf import file_hash, read_manifest, read_pages, read_toc
+from .pdf import file_hash, read_manifest, read_pages
 
 LEGAL_TITLE = re.compile(
-    r"^(?:بموجب )?(?:ظهير شريف|مرسوم|قرار|مقرر|قانون)[^.]{0,200}?رقم\s*(\d[\d.]*\d)\s+صادر",
+    r"^(?:بموجب )?(ظهير شريف|مرسوم|قرار|مقرر|قانون)[^.]{0,200}?رقم\s*(\d[\d.]*\d)\s+صادر",
     re.M,
 )
 # A text ends with its signature, a "* * *" separator between short notices, a new section header,
@@ -33,11 +33,13 @@ DATE_CLAUSE = re.compile(r"(?<!ال)صادر\s*في[^)]*\)")
 # The preamble (laws the text is based on) ends with the decision formula, before the first article
 DECISION = re.compile(r"(?:رسم|قرر|قررت|قررا|يقرر) ما يلي\s*:?")
 # A PDF line break that doesn't end a sentence and isn't followed by an article or a list item is just line wrap
+# texts a title says it amends, completes or repeals ("بتغيير وتتميم المرسوم رقم 2.11.89")
+AMENDS = re.compile(r"(?:بتغيير|بتتميم|بنسخ)[^\d]{0,60}?رقم\s*(\d[\d.]*\d)")
 LINE_WRAP = re.compile(r"(?<![.:؛])\n(?!المادة|[-•*]|\d+\s*[-.)])")
 
 
 def find_titles(full_text):
-    """Return (start offset, text number) for every legal text; announcements have no number."""
+    """Return (start offset, text number, text type) for every legal text; announcements have no number."""
     section = ANNOUNCEMENTS_SECTION.search(full_text)
     legal_part_end = section.start() if section else len(full_text)
 
@@ -45,12 +47,12 @@ def find_titles(full_text):
     for match in LEGAL_TITLE.finditer(full_text, 0, legal_part_end):
         # a decree quoted inside a text is not a new text: the previous one must be signed first
         if not titles or TEXT_END.search(full_text, titles[-1][0], match.start()):
-            titles.append((match.start(), match.group(1)))
+            titles.append((match.start(), match.group(2), match.group(1)))
 
     first = FIRST_ANNOUNCEMENT.search(full_text, section.end()) if section else None
     if first:
-        titles.append((first.start(), ""))
-        titles += [(match.start(), "") for match in ANNOUNCEMENT_TITLE.finditer(full_text, first.end())]
+        titles.append((first.start(), "", "إعلان"))
+        titles += [(match.start(), "", "إعلان") for match in ANNOUNCEMENT_TITLE.finditer(full_text, first.end())]
     return titles
 
 
@@ -92,12 +94,14 @@ def chunk_document(pages, meta):
     )
 
     titles = find_titles(full_text)
-    ends = [start for start, _ in titles[1:]] + [len(full_text)]
+    ends = [start for start, _, _ in titles[1:]] + [len(full_text)]
 
     chunks = []
-    for (start, text_number), end in zip(titles, ends):
+    for (start, text_number, text_type), end in zip(titles, ends):
         legal_text = full_text[start:end].rstrip()
         title = heading(legal_text, text_number)
+        # shortcut: title only, so "تنسخ مقتضيات المادة 5" inside an article is missed; parse articles for amendment links
+        amends = "|".join(number for number in AMENDS.findall(title) if number != text_number)
         headings = [(match.start(), match.group(1)) for match in ARTICLE_HEADING.finditer(legal_text)]
         heading_starts = [position for position, _ in headings]
         if config.UNWRAP_LINES:
@@ -124,6 +128,8 @@ def chunk_document(pages, meta):
                     **meta,
                     "title": title,
                     "text_number": text_number,
+                    "text_type": text_type,
+                    "amends": amends,
                     "article": article,
                     "page_start": page_at(offset),
                     "page_end": page_at(offset + len(source_text) - 1),
@@ -146,26 +152,3 @@ def chunk_all():
         meta = {"doc_id": file_hash(path), "issue": row["issue"], "date": row["date"], "lang": row["lang"]}
         chunks += chunk_document(read_pages(path), meta)
     return chunks
-
-
-if __name__ == "__main__":
-    chunks = chunk_all()
-    assert len({chunk["id"] for chunk in chunks}) == len(chunks), "duplicate chunk ids"
-    assert all(chunk["text"].strip() for chunk in chunks), "empty chunk"
-    assert all(chunk["page_start"] <= chunk["page_end"] for chunk in chunks), "page span backwards"
-
-    texts = {}
-    for chunk in chunks:
-        texts.setdefault((chunk["issue"], chunk["title"]), []).append(chunk)
-
-    print(f"{len(chunks)} chunks, {len(texts)} legal texts\n")
-    for (issue, title), parts in texts.items():
-        pages = f"p.{parts[0]['page_start']}-{parts[-1]['page_end']}"
-        print(f"BO {issue} {pages:10} {len(parts):3} chunks | {title[:90]}")
-
-    # the printed table of contents is a free answer key for the text detection
-    print("\nTable of contents check:")
-    for row in read_manifest():
-        expected = set(re.findall(r"رقم\s*(\d[\d.]*\d)\s+صادر", read_toc(config.PDF_DIR / row["filename"])))
-        found = {chunk["text_number"] for chunk in chunks if chunk["issue"] == row["issue"]} - {""}
-        print(f"BO {row['issue']}: {len(expected)} in TOC, missing {sorted(expected - found)}, not in TOC {sorted(found - expected)}")

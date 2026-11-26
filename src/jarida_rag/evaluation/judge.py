@@ -4,8 +4,8 @@ import torch
 from langchain_huggingface import ChatHuggingFace, HuggingFaceEmbeddings, HuggingFacePipeline
 from transformers import pipeline
 
-from . import config
-from .rag import load_llm
+from .. import config
+from ..rag import load_llm
 
 
 class LocalChatModel(ChatHuggingFace):
