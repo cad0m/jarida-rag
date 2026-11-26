@@ -20,9 +20,10 @@ CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 150
 MIN_CHUNK_CHARS = 30
 
-CHUNK_HEADER = "first_200"  # "first_200": the first 200 characters on later chunks; "short": a one-line title on every chunk
+# Chosen with notebooks/chunking_lab.ipynb (runs lab-v3-* on DagsHub); the other values are kept to reproduce the comparison
+CHUNK_HEADER = "short"  # "short": a one-line title on every chunk; "first_200": the first 200 characters on later chunks
 UNWRAP_LINES = True  # join PDF line wraps so chunks end on sentences, not mid-line
-SPLIT_PREAMBLE = False  
+SPLIT_PREAMBLE = False  # True: the preamble ("بناء على ...") becomes its own chunks; it lowered evidence_mrr
 TOP_K = 5
 MAX_CHUNKS_PER_TEXT = 2
 RERANK_CANDIDATES = 20

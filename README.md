@@ -13,7 +13,7 @@ grounded in the gazette, with a citation for every fact: `[BO 7470, 2.24.830, ا
 | Chunk | `src/jarida_rag/chunk.py` | Pages → legal texts (decrees, orders, notices, studies) → chunks split by article, each labelled with its decree number, article and pages |
 | Index | `src/jarida_rag/store.py` | BGE-M3 embeddings in Postgres + pgvector; search keeps at most 2 chunks per legal text, then an optional BGE cross-encoder reranks them |
 | Answer | `src/jarida_rag/rag.py` | Qwen3-8B (4-bit) answers only from the retrieved context and refuses with a fixed sentence when the answer isn't there; each answer is traced in MLflow |
-| Evaluate | `src/jarida_rag/evaluate.py`, `judge.py` | Retrieval metrics (hit rate, MRR, evidence recall) on 51 questions; RAGAS (faithfulness, answer relevancy, context precision and recall) with Gemma 4 as an independent judge |
+| Evaluate | `src/jarida_rag/evaluate.py`, `judge.py` | Retrieval metrics (hit rate, MRR, evidence recall) on the 76 answerable questions; RAGAS (faithfulness, answer relevancy, context precision and recall) with Gemma 4 as an independent judge |
 
 Settings (models, chunking, top-k, GPUs) are plain variables in `src/jarida_rag/config.py`.
 
