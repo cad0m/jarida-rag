@@ -1,5 +1,7 @@
 import re
 
+from .. import config
+
 NUMBER_WORDS = {"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10"}
 
 
@@ -29,3 +31,16 @@ def has_key_facts(reply, key_fact):
     """Every "&" part of the key fact appears in the answer, any of its "|" alternatives counting."""
     reply = re.sub(r"\[[^\]]*\]", " ", reply)  # citation labels are full of numbers
     return all(any(has_fact(reply, alternative.strip()) for alternative in part.split("|")) for part in key_fact.split("&"))
+
+
+def miss_stage(candidate_rank, capped_rank, final_rank, reranked):
+    """Where the evidence chunk was lost (ranks are 1-based, 0 = absent): tells coverage problems from ranking ones."""
+    if final_rank:
+        return "found"
+    if not candidate_rank:
+        return "not in candidates"
+    if not capped_rank:
+        return "cut by per-text cap"
+    if reranked and capped_rank > config.RERANK_CANDIDATES:
+        return "outside rerank pool"
+    return "ranked below top K"

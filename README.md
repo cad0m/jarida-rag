@@ -14,7 +14,7 @@ grounded in the gazette, with a citation for every fact: `[BO 7470, 2.24.830, ا
 | Index | `src/jarida_rag/store.py`, `lexical.py` | BGE-M3 embeddings in Postgres + pgvector, optionally fused with BM25; search keeps at most 2 chunks per legal text, then a BGE cross-encoder reranks them |
 | Answer | `src/jarida_rag/rag.py` | Qwen3-8B (4-bit) answers only from the retrieved context and refuses with a fixed sentence when the answer isn't there; each answer is traced in MLflow |
 | Evaluate retrieval | `src/jarida_rag/evaluation/retrieval.py` | Is the right legal text in the top 5, and the chunk holding the answer? 76 answerable questions, no LLM |
-| Evaluate answers | `src/jarida_rag/evaluation/generation.py`, `judge.py` | Key-fact and refusal accuracy by string match, then RAGAS faithfulness and answer relevancy with Gemma 4 as an independent judge |
+| Evaluate answers | `src/jarida_rag/evaluation/generation.py`, `judge.py` | Key-fact accuracy on every answerable question and refusal accuracy, by string match; then RAGAS faithfulness on the single-fact answers, with Gemma 4 as an independent judge |
 
 Settings (models, chunking, top-k, GPUs) are plain variables in `src/jarida_rag/config.py`.
 
@@ -25,7 +25,7 @@ Settings (models, chunking, top-k, GPUs) are plain variables in `src/jarida_rag/
 | Right legal text in the top 5 | 73 / 76 |
 | Chunk holding the answer in the top 5 | 62 / 76 |
 | Correct key fact (15 single-fact questions) | 13 / 15 |
-| Faithfulness / answer relevancy (RAGAS) | 0.87 / 0.94 |
+| Faithfulness (RAGAS) | 0.87 |
 | Refusals on out-of-scope questions (the fixed sentence alone) | 7 / 10 |
 
 Measured improvements (evidence MRR, the rank of the chunk that holds the answer):

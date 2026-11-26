@@ -23,10 +23,8 @@ def load_embedder():
 
 
 def load_reranker():
-    reranker = CrossEncoder(config.RERANKER_MODEL, device=config.EMBED_DEVICE, max_length=1024)
-    if config.EMBED_DEVICE.startswith("cuda"):
-        reranker.model.half()
-    return reranker
+    # full precision: fp16 was 4x faster but ranked the answer chunk lower (evidence_mrr -0.03 on every variant)
+    return CrossEncoder(config.RERANKER_MODEL, device=config.EMBED_DEVICE, max_length=1024)
 
 
 def embed(embedder, texts):
@@ -78,6 +76,11 @@ def load_lexical(pool):
 
 
 def search(pool, embedder, question, reranker=None, lexical_index=None):
+    return best_hits(question, candidates(pool, embedder, question, lexical_index), reranker)
+
+
+def candidates(pool, embedder, question, lexical_index=None):
+    """The closest chunks, fused with BM25 if given: the pool the per-text cap and the reranker then work on."""
     vector = embed(embedder, [question])[0]
     # <=> is cosine distance; shortcut: a fixed pool of candidates, filter by metadata in SQL when the corpus grows
     with pool.connection() as db:
@@ -87,21 +90,19 @@ def search(pool, embedder, question, reranker=None, lexical_index=None):
             f"SELECT {', '.join(COLUMNS)} FROM {config.TABLE} ORDER BY embedding <=> %s LIMIT {CANDIDATES}",
             [vector],
         ).fetchall()
-    return best_hits(question, hits, reranker, lexical_index)
+    return lexical.fuse(hits, lexical.search(lexical_index, question, CANDIDATES)) if lexical_index else hits
 
 
-def search_in_memory(chunks, vectors, embedder, question, reranker=None, lexical_index=None):
-    """Same search without a database, to compare variants quickly (notebooks/retrieval.ipynb)."""
+def candidates_in_memory(chunks, vectors, embedder, question, lexical_index=None):
+    """Same candidates without a database, to compare variants quickly (notebooks/retrieval.ipynb)."""
     vector = embed(embedder, [question])[0]
     closest = (vectors @ vector).argsort()[::-1][:CANDIDATES]  # vectors are normalized: dot product = cosine
-    return best_hits(question, [chunks[i] for i in closest], reranker, lexical_index)
+    hits = [chunks[i] for i in closest]
+    return lexical.fuse(hits, lexical.search(lexical_index, question, CANDIDATES)) if lexical_index else hits
 
 
-def best_hits(question, hits, reranker=None, lexical_index=None):
-    """From dense candidates: fused with BM25 if given, a few chunks per legal text, optionally reranked, top K."""
-    if lexical_index:
-        hits = lexical.fuse(hits, lexical.search(lexical_index, question, CANDIDATES))
-    # keep at most a few chunks per legal text, so one long decree can't fill the whole context
+def cap_per_text(hits):
+    """At most MAX_CHUNKS_PER_TEXT chunks per legal text, so one long decree can't fill the reranker's pool."""
     results = []
     per_text = {}
     for hit in hits:
@@ -109,7 +110,12 @@ def best_hits(question, hits, reranker=None, lexical_index=None):
         per_text[text_key] = per_text.get(text_key, 0) + 1
         if per_text[text_key] <= config.MAX_CHUNKS_PER_TEXT:
             results.append(hit)
+    return results
 
+
+def best_hits(question, hits, reranker=None):
+    """From the candidates: the per-text cap, the reranker on the first RERANK_CANDIDATES, then the top K."""
+    results = cap_per_text(hits)
     if reranker:
         candidates = results[:config.RERANK_CANDIDATES]
         scores = reranker.predict([(question, hit["embed_text"]) for hit in candidates])

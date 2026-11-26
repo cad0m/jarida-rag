@@ -2,30 +2,27 @@ import time
 
 import pandas as pd
 import ragas
-from ragas.embeddings import LangchainEmbeddingsWrapper
 from ragas.llms import LangchainLLMWrapper
-from ragas.metrics import Faithfulness, ResponseRelevancy
+from ragas.metrics import Faithfulness
 from ragas.run_config import RunConfig
 
 from ..rag import NOT_FOUND_AR, NOT_FOUND_EN, answer, source
 from .retrieval import OUT_OF_SCOPE, log_run, read_questions
 from .scoring import has_key_facts
 
-RAGAS_TYPES = ("attribute",)  # single-fact questions: about 15, which keeps the judge run near 40 minutes
+RAGAS_TYPES = ("attribute",)  # single-fact questions: the judge only grades these 15, which keeps it near 25 minutes
 
 
 def answer_questions(pool, embedder, tokenizer, model, reranker=None, lexical_index=None):
-    """Answers the single-fact questions and the ones the gazette can't answer."""
+    """Answers every question of the golden set, the out-of-scope ones included."""
     answers = []
     for question in read_questions():
         should_refuse = question["expected"] == OUT_OF_SCOPE
-        if question["type"] not in RAGAS_TYPES and not should_refuse:
-            continue
-
         start = time.time()
         reply, hits = answer(question["question"], pool, embedder, tokenizer, model, reranker, lexical_index)
         answers.append({
             "question": question["question"],
+            "type": question["type"],
             "expected": question["expected"],
             "answer": reply,
             # exactly what the LLM saw, citation labels included, so the judge can check the citations too
@@ -41,20 +38,22 @@ def answer_questions(pool, embedder, tokenizer, model, reranker=None, lexical_in
 
 
 def evaluate(answers, run_name, retriever):
-    """Fact and refusal accuracy: deterministic, so a prompt change is measured in minutes, without the judge."""
+    """Fact and refusal accuracy: deterministic, so a prompt change is measured without the judge."""
     table = pd.DataFrame(answers).drop(columns="contexts")
+    answerable = table[~table["should_refuse"]]
     metrics = {
-        "fact_accuracy": table["facts_ok"].dropna().astype(bool).mean(),
-        "refusal_accuracy": (table["refused"] == table["should_refuse"]).mean(),
+        "fact_accuracy": answerable["facts_ok"].astype(bool).mean(),
+        "refusal_accuracy": table[table["should_refuse"]]["refused"].mean(),
+        "false_refusal_rate": answerable["refused"].mean(),  # answerable questions the model declined
         "avg_answer_seconds": table["seconds"].mean(),
     }
     log_run(run_name, "generation", retriever, metrics, {"answers.json": table})
     return table, metrics
 
 
-def ragas_eval(answers, judge, judge_embeddings, run_name, retriever):
+def ragas_eval(answers, judge, run_name, retriever):
     # A correct "not found" has no claims for RAGAS to check, so refusals are measured apart
-    golden = [item for item in answers if not item["should_refuse"]]
+    golden = [item for item in answers if item["type"] in RAGAS_TYPES and not item["should_refuse"]]
     dataset = ragas.EvaluationDataset.from_list([
         {
             "user_input": item["question"],
@@ -64,21 +63,15 @@ def ragas_eval(answers, judge, judge_embeddings, run_name, retriever):
         }
         for item in golden
     ])
-    # retrieval quality is measured exactly by evaluation/retrieval.py, so only the answer is judged here
-    metrics = [Faithfulness(), ResponseRelevancy(strictness=1)]
-
+    # retrieval is measured exactly by evaluation/retrieval.py and correctness by key facts: the judge checks grounding
     result = ragas.evaluate(
         dataset,
-        metrics=metrics,
+        metrics=[Faithfulness()],
         llm=LangchainLLMWrapper(judge),
-        embeddings=LangchainEmbeddingsWrapper(judge_embeddings),
         run_config=RunConfig(max_workers=1, timeout=900),
         raise_exceptions=False,
     )
     scores = result.to_pandas()
-    names = [metric.name for metric in metrics]
-
-    summary = {name: scores[name].mean() for name in names}
-    summary["nan_rate"] = scores[names].isna().mean().mean()
+    summary = {"faithfulness": scores["faithfulness"].mean(), "nan_rate": scores["faithfulness"].isna().mean()}
     log_run(run_name, "ragas", retriever, summary, {"ragas.json": scores})
     return scores

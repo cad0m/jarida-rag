@@ -1,4 +1,4 @@
-from jarida_rag.evaluation.scoring import has_key_facts
+from jarida_rag.evaluation.scoring import has_key_facts, miss_stage
 
 # each case is one the scorer once got wrong
 
@@ -24,3 +24,12 @@ def test_citation_labels_are_not_facts():
 def test_and_or_parts():
     assert has_key_facts("within sixty (60) days", "60&days|months")
     assert not has_key_facts("within sixty (60) days", "60&weeks")
+
+
+def test_miss_stage_names_where_the_evidence_was_lost():
+    assert miss_stage(3, 2, 1, reranked=True) == "found"
+    assert miss_stage(0, 0, 0, reranked=True) == "not in candidates"
+    assert miss_stage(7, 0, 0, reranked=True) == "cut by per-text cap"
+    assert miss_stage(40, 25, 0, reranked=True) == "outside rerank pool"
+    assert miss_stage(40, 25, 0, reranked=False) == "ranked below top K"
+    assert miss_stage(9, 6, 0, reranked=True) == "ranked below top K"

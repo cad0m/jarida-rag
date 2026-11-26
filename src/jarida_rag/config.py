@@ -25,8 +25,8 @@ CHUNK_HEADER = "short"  # "short": a one-line title on every chunk; "first_200":
 UNWRAP_LINES = True  # join PDF line wraps so chunks end on sentences, not mid-line
 SPLIT_PREAMBLE = False  # True: the preamble ("بناء على ...") becomes its own chunks; it lowered evidence_mrr
 TOP_K = 5
-HYBRID = False  # BM25 fused with dense search; chosen in notebooks/retrieval.ipynb
-MAX_CHUNKS_PER_TEXT = 2
+HYBRID = False  # BM25 fused with dense search: no evidence gain over cap 4 in notebooks/retrieval.ipynb
+MAX_CHUNKS_PER_TEXT = 4  # before the reranker; 2 hid the right article of long decrees (evidence hits 62 -> 67 of 76)
 RERANK_CANDIDATES = 20
 
 EMBED_MODEL = "BAAI/bge-m3"
@@ -40,5 +40,4 @@ MAX_NEW_TOKENS = 768
 
 JUDGE_MODEL = "google/gemma-4-12B-it"
 JUDGE_DEVICE = "cuda:0"
-JUDGE_EMBED_DEVICE = "cuda:1"
 JUDGE_MAX_TOKENS = 2048  # faithfulness lists every claim as JSON; 1024 cut long answers mid-JSON
