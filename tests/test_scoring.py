@@ -17,6 +17,12 @@ def test_numbers_written_in_words_or_inside_other_numbers():
     assert not has_key_facts("decree 2.26.28 sets it", "2")
 
 
+def test_decimal_comma_and_alef_spelling():
+    assert has_key_facts("تزن 39.94 غراما", "39,94")
+    assert has_key_facts("- أمحمد عطفاوي", "امحمد عطفاوي")
+    assert not has_key_facts("750.000 درهم", "75")
+
+
 def test_citation_labels_are_not_facts():
     assert not has_key_facts("see [BO 7470, 2.24.830, المادة 5, p. 8]", "5")
 

@@ -1,11 +1,12 @@
 import csv
+import hashlib
 import time
 
 import mlflow
 import pandas as pd
 
 from .. import config
-from ..rag import source
+from ..rag import SYSTEM_PROMPT, source
 from ..store import best_hits, cap_per_text
 from .scoring import contains, miss_stage
 
@@ -32,7 +33,10 @@ def log_run(run_name, stage, retriever, metrics, tables):
             "chunk_header": config.CHUNK_HEADER,
             "unwrap_lines": config.UNWRAP_LINES,
             "split_preamble": config.SPLIT_PREAMBLE,
+            # a short id to filter runs by prompt version; the full text is logged next to it
+            "prompt_sha": hashlib.sha1(SYSTEM_PROMPT.encode()).hexdigest()[:8],
         })
+        mlflow.log_text(SYSTEM_PROMPT, "system_prompt.txt")
         mlflow.log_metrics(metrics)
         for name, table in tables.items():
             mlflow.log_table(table, name)

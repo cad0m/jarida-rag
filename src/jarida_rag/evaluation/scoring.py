@@ -2,6 +2,7 @@ import re
 
 from .. import config
 
+ALEF_VARIANTS = str.maketrans("أإآ", "ااا")  # "أمحمد" and "امحمد" are the same name
 NUMBER_WORDS = {"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10"}
 
 
@@ -11,8 +12,10 @@ def contains(text, phrase):
 
 
 def normalize(text):
-    """Lowercase, small English numbers as digits, and no Arabic article: "للتجهيز" (ل + ال) still holds "تجهيز"."""
+    """Lowercase, small English numbers as digits, one alef, a decimal point for "39,94",
+    and no Arabic article: "للتجهيز" (ل + ال) still holds "تجهيز"."""
     text = re.sub(r"\b(?:" + "|".join(NUMBER_WORDS) + r")\b", lambda match: NUMBER_WORDS[match.group()], text.lower())
+    text = re.sub(r"(?<=\d),(?=\d)", ".", text).translate(ALEF_VARIANTS)
     return re.sub(r"(?<!\S)ال", "", text)
 
 

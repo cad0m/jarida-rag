@@ -22,15 +22,18 @@ Settings (models, chunking, top-k, GPUs) are plain variables in `src/jarida_rag/
 
 | Metric | Value |
 |---|---|
-| Right legal text in the top 5 | 73 / 76 |
-| Chunk holding the answer in the top 5 | 62 / 76 |
+| Right legal text in the top 5 | 75 / 76 |
+| Chunk holding the answer in the top 5 | 68 / 76 |
 | Correct key fact (15 single-fact questions) | 13 / 15 |
 | Faithfulness (RAGAS) | 0.87 |
 | Refusals on out-of-scope questions (the fixed sentence alone) | 7 / 10 |
 
-Measured improvements (evidence MRR, the rank of the chunk that holds the answer):
-a one-line title on every chunk instead of its first 200 characters, 0.65 → 0.71 (`notebooks/retrieval.ipynb`),
-and the reranker, 0.60 → 0.71 for about 1.6 s more per question.
+Measured improvements (`notebooks/retrieval.ipynb`; chunks holding the answer in the top 5, out of 76):
+- a one-line title on every chunk instead of its first 200 characters: 61 → 68
+- 4 chunks per legal text before the reranker instead of 2: 62 → 68
+- the reranker: 65 → 68, for about 1.4 s more per question
+
+BM25 fused with dense search was tested and added nothing (68 → 68), so it is off.
 Faithfulness does not measure correctness, so key facts are also checked by string match. Of the three missed refusals,
 two declined correctly but not with the fixed sentence alone (one in its own words, one with an explanation before it),
 and one quoted the replacement text of a repealed article as the repealed one.

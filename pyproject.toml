@@ -20,6 +20,7 @@ dependencies = [
     "pandas",
     "rank-bm25",
     "wordfreq>=3.1.1",
+    "curl-cffi",
 ]
 
 [project.optional-dependencies]
