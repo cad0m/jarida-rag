@@ -15,6 +15,9 @@ CREATE TABLE IF NOT EXISTS documents (
     attempts int NOT NULL DEFAULT 0,
     size bigint,
     sha256 text,
+    drive_id text,
+    indexed_version text,
+    indexed_chunks int,
     error text,
     updated_at timestamptz NOT NULL DEFAULT now()
 )"""
@@ -49,7 +52,7 @@ def pending(db, limit):
 def save_results(db, results):
     db.cursor().executemany("""
         UPDATE documents
-        SET status = %(status)s, size = %(size)s, sha256 = %(sha256)s, error = %(error)s,
+        SET status = %(status)s, size = %(size)s, sha256 = %(sha256)s, drive_id = %(drive_id)s, error = %(error)s,
             attempts = attempts + 1, updated_at = now()
         WHERE url = %(url)s""", results)
 

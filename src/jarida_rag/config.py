@@ -46,6 +46,13 @@ EMBED_DEVICE = "cuda:0"
 EMBED_BATCH = 16
 RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 
+# Everything that shapes the stored chunks: a document indexed under another version is indexed again
+PARSER_VERSION = 1  # bump when a change to pdf.py or chunk.py alters their output
+INDEX_VERSION = "|".join(map(str, [
+    PARSER_VERSION, EMBED_MODEL, HEADER_LINE, MIN_PAGE_CHARS, MIN_DOCUMENT_ARABIC_RATIO,
+    CHUNK_SIZE, CHUNK_OVERLAP, MIN_CHUNK_CHARS, CHUNK_HEADER, UNWRAP_LINES, SPLIT_PREAMBLE,
+]))
+
 LLM_MODEL = "Qwen/Qwen3-8B"
 LLM_DEVICE = "cuda:1"
 MAX_NEW_TOKENS = 768

@@ -1,77 +1,61 @@
 # jarida-rag
 
-Ask legal questions in Arabic or English about the Moroccan Official Gazette (الجريدة الرسمية) and get answers
-grounded in the gazette, with a citation for every fact: `[BO 7470, 2.24.830, المادة 5, p. 8]`.
-
-**Status:** working end to end on three born-digital issues (7467, 7470, 7497), evaluated with RAGAS and tracked in MLflow.
+Ask questions in Arabic or English about the Moroccan Official Gazette (الجريدة الرسمية) and get an answer taken
+only from the gazette, with the source of every fact: `[BO 7470, 2.24.830, المادة 5, p. 8]`.
+When the gazette doesn't hold the answer, it says so instead of guessing.
 
 ## How it works
 
-| Step | File | What it does |
-|---|---|---|
-| Extract | `src/jarida_rag/pdf.py` | PDF → clean page text with pypdfium2: crops the running header by position, repairs broken Arabic ligatures (`إعالن` → `إعلان`), mirrored brackets and reversed Latin words, and flags every page it doesn't keep |
-| Chunk | `src/jarida_rag/chunk.py` | Pages → legal texts (decrees, orders, notices, studies) → chunks split by article, each labelled with its decree number, text type, the texts it amends, article and pages |
-| Index | `src/jarida_rag/store.py`, `lexical.py` | BGE-M3 embeddings in Postgres + pgvector, optionally fused with BM25; search keeps at most 2 chunks per legal text, then a BGE cross-encoder reranks them |
-| Answer | `src/jarida_rag/rag.py` | Qwen3-8B (4-bit) answers only from the retrieved context and refuses with a fixed sentence when the answer isn't there; each answer is traced in MLflow |
-| Evaluate retrieval | `src/jarida_rag/evaluation/retrieval.py` | Is the right legal text in the top 5, and the chunk holding the answer? 76 answerable questions, no LLM |
-| Evaluate answers | `src/jarida_rag/evaluation/generation.py`, `judge.py` | Key-fact accuracy on every answerable question and refusal accuracy, by string match; then RAGAS faithfulness on the single-fact answers, with Gemma 4 as an independent judge |
+1. **Collect** (`src/jarida_rag/sources/`): lists every issue on sgg.gov.ma, downloads the new PDFs and uploads them
+   to Google Drive with rclone. A `documents` table in Postgres tracks each one (listed, stored, failed, indexed).
+2. **Extract** (`pdf.py`): turns each PDF page into clean Arabic text and repairs the usual extraction errors.
+3. **Chunk** (`chunk.py`): splits an issue into its legal texts (decrees, orders, notices), then into chunks by article,
+   each labelled with its text number, article and pages.
+4. **Index** (`store.py`): embeds the chunks with BGE-M3 into Postgres + pgvector. `update_index` reads the PDFs from
+   the shared Drive folder and only indexes documents that are new or were chunked with older settings.
+5. **Search**: finds the closest chunks, keeps a few per legal text, and reranks them with a cross-encoder.
+6. **Answer** (`rag.py`): Qwen3-8B answers from those chunks only and cites each one.
+7. **Evaluate** (`evaluation/`): a golden set of questions checks retrieval, answers and refusals; RAGAS checks that
+   answers stay faithful to the context. Every run is tracked in MLflow.
 
-Settings (models, chunking, top-k, GPUs) are plain variables in `src/jarida_rag/config.py`.
+All settings (models, chunk size, top-k, GPUs) are plain variables in `src/jarida_rag/config.py`.
 
-## Results (3 issues, final system with reranker)
+## Run
 
-| Metric | Value |
-|---|---|
-| Right legal text in the top 5 | 75 / 76 |
-| Chunk holding the answer in the top 5 | 68 / 76 |
-| Correct key fact (15 single-fact questions) | 13 / 15 |
-| Faithfulness (RAGAS) | 0.87 |
-| Refusals on out-of-scope questions (the fixed sentence alone) | 7 / 10 |
+**Collect** (on your machine, with rclone set up for your Drive):
 
-Measured improvements (`notebooks/retrieval.ipynb`; chunks holding the answer in the top 5, out of 76):
-- a one-line title on every chunk instead of its first 200 characters: 61 → 68
-- 4 chunks per legal text before the reranker instead of 2: 62 → 68
-- the reranker: 65 → 68, for about 1.4 s more per question
+```bash
+pip install -e .
+python -m jarida_rag.sources.collect
+```
 
-BM25 fused with dense search was tested and added nothing (68 → 68), so it is off.
-Faithfulness does not measure correctness, so key facts are also checked by string match. Of the three missed refusals,
-two declined correctly but not with the fixed sentence alone (one in its own words, one with an explanation before it),
-and one quoted the replacement text of a repealed article as the repealed one.
+Then share the Drive folder as "anyone with the link", so Kaggle can read the PDFs without logging in.
+
+**Index, answer and evaluate** (Kaggle, GPU T4 x2), with the secrets `NEON_DATABASE_URL`, `DAGSHUB_TOKEN` and `HF_TOKEN`:
+
+- `notebooks/retrieval.ipynb`: compares chunking and search settings, without the LLM.
+- `notebooks/generation.ipynb`: indexes, answers the golden questions and runs RAGAS.
+
+**Chat** (`frontend/`): a React chat page that calls the RAG API.
 
 ## Data
 
-- PDFs are not in git: put them in `data/`, or attach them as a Kaggle dataset.
-- `data/manifest.csv`: one row per issue (`filename, issue, date, lang`).
-- `data/questions.csv`: the golden set (86 questions, each checked against the extracted text).
-  `expected` is the normalized answer (`OUT_OF_SCOPE` when the gazette can't answer), `evidence` a verbatim quote,
-  `key_fact` the minimal fact a correct answer contains (`&` = and, `|` = or), `reference` the decree number(s).
+- `data/manifest.csv`: the issues used for evaluation (PDFs are not in git).
+- `data/questions.csv`: the golden questions, each with its expected answer, a quote from the gazette and its key fact.
 
-## Run on Kaggle (GPU T4 x2)
-
-Add these Kaggle secrets: `NEON_DATABASE_URL` (Postgres with pgvector), `DAGSHUB_TOKEN` (MLflow) and `HF_TOKEN`
-(the Gemma judge is gated). Then run the two stages in order, each top to bottom:
-
-1. `notebooks/retrieval.ipynb`: compares chunking and retrieval variants in memory, without the LLM or the database.
-   Write the winner into `config.py`.
-2. `notebooks/generation.ipynb`: indexes into Postgres, answers, scores key facts and refusals, then runs RAGAS.
-
-Every MLflow run is tagged `stage` = `retrieval`, `generation` or `ragas`.
-
-## Tests (CPU, no models)
+## Tests
 
 ```bash
 pip install -e ".[dev]"
 pytest
 ```
 
-They check the answer scorer, the BM25 tokenizer, and chunking. Each issue's printed table of contents serves as the answer key for text detection.
-The chunking tests are skipped when the PDFs aren't in `data/`.
+They run on CPU without models and check the answer scorer, the BM25 tokenizer, chunking and the gazette site parser.
 
 ## Known limits
 
-- Scanned issues (no text layer) need OCR, and older issues typeset in a non-Unicode Arabic font extract as garbage.
-- Some recent issues (7167, 7168, 7401, 7439, 7441) extract body text correctly but scramble bold title lines.
-- Study and opinion pages keep some line fragments out of order, with footnotes mixed into the text.
-- Each chunk stores its text type and the texts its title says it amends, but search doesn't filter on them yet.
-  With 3 issues, no question needs a date or type filter, and most amended texts aren't indexed.
-  This will be useful once more years are ingested.
+- Scanned issues need OCR, and some older issues use a font that extracts as garbage.
+- Tables in studies and opinions lose part of their layout.
+- Questions that need a full list across many texts get only the top results.
+- Links between a text and the texts it amends or repeals come from titles only, and search doesn't filter by date
+  or text type yet.

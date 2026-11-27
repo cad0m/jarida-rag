@@ -150,5 +150,5 @@ def chunk_all():
     for row in read_manifest():
         path = config.PDF_DIR / row["filename"]
         meta = {"doc_id": file_hash(path), "issue": row["issue"], "date": row["date"], "lang": row["lang"]}
-        chunks += chunk_document(read_pages(path), meta)
+        chunks += chunk_document(read_pages(path, path.name), meta)
     return chunks

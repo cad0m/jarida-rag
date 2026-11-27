@@ -111,9 +111,12 @@ def page_status(text):
     return "ok"
 
 
-def read_pages(path):
-    """Clean text of every indexable page. Skipped and suspicious pages are reported, never dropped silently."""
-    pdf = pdfium.PdfDocument(path)
+def read_pages(source, name):
+    """Clean text of every indexable page of a PDF (a path or its bytes).
+
+    Skipped and suspicious pages are reported, never dropped silently.
+    """
+    pdf = pdfium.PdfDocument(source)
     pages = []
     for index in range(len(pdf)):
         text = clean_text(page_body(pdf[index]))
@@ -124,11 +127,11 @@ def read_pages(path):
     for page in pages:
         if page["status"] != "ok":
             flagged.setdefault(page["status"], []).append(page["page"])
-    print(f"{path.name}: {len(pages)} pages, flagged {flagged}")
+    print(f"{name}: {len(pages)} pages, flagged {flagged}")
 
     # a whole issue in an old non-Unicode font (or a scan) is unreadable: skip it instead of indexing garbage
     if not pages or statistics.median(arabic_ratio(page["text"]) for page in pages) < config.MIN_DOCUMENT_ARABIC_RATIO:
-        print(f"{path.name}: SKIPPED, the text layer is not readable Arabic (needs OCR)")
+        print(f"{name}: SKIPPED, the text layer is not readable Arabic (needs OCR)")
         return []
     return [page for page in pages if page["status"] in ("ok", "low_arabic")]
 

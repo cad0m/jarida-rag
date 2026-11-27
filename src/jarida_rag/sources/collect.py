@@ -23,17 +23,34 @@ async def store_all(documents):
 
 
 async def store(session, slots, document):
-    result = {"url": document["url"], "status": "failed", "size": None, "sha256": None, "error": None}
     async with slots:
         try:
             content = await site.download(session, document["url"])
-            await asyncio.to_thread(drive.upload, document["path"], content)
+            drive_id = await asyncio.to_thread(drive.upload, document["path"], content)
         except (RequestsError, RuntimeError) as error:
-            result["error"] = str(error)
+            result = failed(document, str(error))
         else:
-            result.update(status="stored", size=len(content), sha256=hashlib.sha256(content).hexdigest())
+            result = {
+                "url": document["url"],
+                "status": "stored",
+                "size": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+                "drive_id": drive_id,
+                "error": None,
+            }
         await asyncio.sleep(config.REQUEST_PAUSE)
     return result
+
+
+def failed(document, error):
+    return {
+        "url": document["url"],
+        "status": "failed",
+        "size": None,
+        "sha256": None,
+        "drive_id": None,
+        "error": error,
+    }
 
 
 if __name__ == "__main__":

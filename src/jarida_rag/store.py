@@ -5,7 +5,9 @@ from psycopg_pool import ConnectionPool
 from sentence_transformers import CrossEncoder, SentenceTransformer
 
 from . import config, lexical
-from .chunk import chunk_all
+from .chunk import chunk_all, chunk_document
+from .pdf import read_pages
+from .sources import drive
 
 COLUMNS = [
     "id", "text", "embed_text", "doc_id", "issue", "date", "lang",
@@ -48,25 +50,76 @@ def connect():
     )
 
 
-def build_index(pool, embedder):
-    chunks = chunk_all()
-    vectors = embed(embedder, [chunk["embed_text"] for chunk in chunks])
+def create_chunks_table(db, dimensions):
+    db.execute(f"""
+        CREATE TABLE IF NOT EXISTS {config.TABLE} (
+            id uuid PRIMARY KEY,
+            text text, embed_text text, doc_id text, issue text, date date, lang text,
+            title text, text_number text, text_type text, amends text, article text, page_start int, page_end int,
+            embedding vector({dimensions})
+        )""")
+    db.execute(f"CREATE INDEX IF NOT EXISTS {config.TABLE}_embedding_idx ON {config.TABLE} USING hnsw (embedding vector_cosine_ops)")
+    db.execute(f"CREATE INDEX IF NOT EXISTS {config.TABLE}_doc_id_idx ON {config.TABLE} (doc_id)")
+
+
+def insert_chunks(db, chunks, vectors):
     rows = [[chunk[column] for column in COLUMNS] + [vector] for chunk, vector in zip(chunks, vectors)]
     placeholders = ", ".join(["%s"] * (len(COLUMNS) + 1))
+    db.cursor().executemany(f"INSERT INTO {config.TABLE} ({', '.join(COLUMNS)}, embedding) VALUES ({placeholders})", rows)
 
+
+def build_index(pool, embedder):
+    """Rebuild the table from the PDFs of data/manifest.csv: the fixed corpus of the evaluation notebooks."""
+    chunks = chunk_all()
+    vectors = embed(embedder, [chunk["embed_text"] for chunk in chunks])
     # one transaction: if the connection drops mid-insert, the previous table stays instead of a partial one
     with pool.connection() as db, db.transaction():
         db.execute(f"DROP TABLE IF EXISTS {config.TABLE}")
-        db.execute(f"""
-            CREATE TABLE {config.TABLE} (
-                id uuid PRIMARY KEY,
-                text text, embed_text text, doc_id text, issue text, date date, lang text,
-                title text, text_number text, text_type text, amends text, article text, page_start int, page_end int,
-                embedding vector({len(vectors[0])})
-            )""")
-        db.cursor().executemany(f"INSERT INTO {config.TABLE} ({', '.join(COLUMNS)}, embedding) VALUES ({placeholders})", rows)
-        db.execute(f"CREATE INDEX ON {config.TABLE} USING hnsw (embedding vector_cosine_ops)")
+        create_chunks_table(db, len(vectors[0]))
+        insert_chunks(db, chunks, vectors)
     return len(chunks)
+
+
+def update_index(pool, embedder):
+    """Index the stored documents that are new or were indexed under another config.INDEX_VERSION.
+
+    A document is downloaded from Drive only when it needs indexing. One whose chunks went missing
+    (build_index dropped the table) counts as not indexed.
+    """
+    with pool.connection() as db:
+        create_chunks_table(db, embedder.get_sentence_embedding_dimension())
+        documents = db.execute(f"""
+            SELECT * FROM documents
+            WHERE status = 'stored' AND (
+                indexed_version IS DISTINCT FROM %s
+                OR indexed_chunks > (SELECT count(*) FROM {config.TABLE} WHERE doc_id = documents.sha256)
+            )
+            ORDER BY date DESC""", [config.INDEX_VERSION]).fetchall()
+    indexed = 0
+    for document in documents:
+        # one PDF that can't be had or read (network, Drive not shared, broken file) must not stop the others;
+        # OSError covers curl_cffi's network errors, RuntimeError the Drive check and pdfium's PdfiumError
+        try:
+            index_document(pool, embedder, document)
+            indexed += 1
+        except (RuntimeError, OSError) as error:
+            print(f"skipped {document['path']}: {error}")
+    return indexed
+
+
+def index_document(pool, embedder, document):
+    pages = read_pages(drive.download(document["drive_id"]), document["filename"])
+    meta = {"doc_id": document["sha256"], "issue": document["issue"], "date": document["date"], "lang": "ar"}
+    chunks = chunk_document(pages, meta)
+    vectors = embed(embedder, [chunk["embed_text"] for chunk in chunks]) if chunks else []
+    with pool.connection() as db, db.transaction():
+        db.execute(f"DELETE FROM {config.TABLE} WHERE doc_id = %s", [document["sha256"]])
+        insert_chunks(db, chunks, vectors)
+        # an unreadable scan is recorded too (0 chunks), so it isn't downloaded again on every run
+        db.execute(
+            "UPDATE documents SET indexed_version = %s, indexed_chunks = %s WHERE url = %s",
+            [config.INDEX_VERSION, len(chunks), document["url"]],
+        )
 
 
 def load_lexical(pool):
